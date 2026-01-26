@@ -1,0 +1,82 @@
+name: CI
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Setup Flutter
+      uses: subosito/flutter-action@v2
+      with:
+        flutter-version: '3.19.0'
+        channel: 'stable'
+    
+    - name: Install dependencies
+      run: flutter pub get
+    
+    - name: Analyze code
+      run: flutter analyze
+    
+    - name: Run tests
+      run: flutter test
+    
+    - name: Format code check
+      run: flutter format --set-exit-if-changed .
+    
+    - name: Build web
+      run: flutter build web --release
+    
+    - name: Build APK
+      run: flutter build apk --release
+
+  lint:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Setup Dart
+      uses: dart-lang/setup-dart@v1
+      with:
+        sdk: '3.11.0-200.1.beta'
+    
+    - name: Run dart analyze
+      run: dart analyze
+    
+    - name: Run dart format
+      run: dart format --output=none --set-exit-if-changed .
+
+  security:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Run security audit
+      run: |
+        flutter pub outdated
+        flutter pub audit
+
+  documentation:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Check documentation
+      run: |
+        # Check if README exists
+        test -f README.md || exit 1
+        # Check if LICENSE exists
+        test -f LICENSE || exit 1
+        # Check if CONTRIBUTING exists
+        test -f CONTRIBUTING.md || exit 1
+        echo "All required documentation files exist"

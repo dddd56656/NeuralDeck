@@ -1,0 +1,75 @@
+NEURAL DECK PROPRIETARY LICENSE
+Version 1.0, January 2026
+
+Copyright (c) 2026 NeuralDeck Technologies. All rights reserved.
+
+1. DEFINITIONS
+
+"Software" means the NeuralDeck application, including all source code, binaries,
+documentation, and related materials.
+
+"User" means any individual or entity that obtains a copy of the Software.
+
+2. LICENSE GRANT
+
+Subject to the terms and conditions of this License, NeuralDeck Technologies
+grants User a non-exclusive, non-transferable, limited license to:
+
+a) Use the Software for personal, non-commercial purposes only.
+b) Modify the Software for personal use only.
+c) Distribute verbatim copies of the Software to other individuals for
+   non-commercial purposes.
+
+3. RESTRICTIONS
+
+User may NOT:
+
+a) Use the Software for any commercial purpose without obtaining a separate
+   commercial license from NeuralDeck Technologies.
+b) Reverse engineer, decompile, or disassemble the Software, except to the
+   extent that such activity is expressly permitted by applicable law.
+c) Remove or alter any copyright, trademark, or other proprietary notices
+   contained in the Software.
+d) Distribute modified versions of the Software without explicit written
+   permission from NeuralDeck Technologies.
+e) Use the Software to develop competing products or services.
+
+4. INTELLECTUAL PROPERTY
+
+All intellectual property rights in the Software remain the exclusive property
+of NeuralDeck Technologies. This License does not grant User any rights to
+patents, copyrights, trade secrets, trademarks, or any other rights in respect
+to the Software.
+
+5. THIRD-PARTY COMPONENTS
+
+The Software may include third-party components that are subject to their own
+licenses. User is responsible for complying with all applicable third-party
+license terms.
+
+6. DISCLAIMER OF WARRANTY
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+7. TERMINATION
+
+This License is effective until terminated. NeuralDeck Technologies may
+terminate this License at any time if User fails to comply with any term hereof.
+Upon termination, User must destroy all copies of the Software.
+
+8. GOVERNING LAW
+
+This License shall be governed by the laws of the State of California, without
+regard to its conflict of law provisions.
+
+9. CONTACT INFORMATION
+
+For licensing inquiries, please contact:
+NeuralDeck Technologies
+contact@neuraldeck.ai

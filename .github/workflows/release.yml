@@ -1,0 +1,78 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build-and-release:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Setup Flutter
+      uses: subosito/flutter-action@v2
+      with:
+        flutter-version: '3.19.0'
+        channel: 'stable'
+    
+    - name: Install dependencies
+      run: flutter pub get
+    
+    - name: Verify version
+      run: |
+        TAG_NAME=${GITHUB_REF#refs/tags/}
+        PUBSPEC_VERSION=$(grep 'version:' pubspec.yaml | head -1 | awk '{print $2}')
+        echo "Tag: $TAG_NAME"
+        echo "Pubspec version: $PUBSPEC_VERSION"
+        # Remove 'v' prefix from tag for comparison
+        TAG_VERSION=${TAG_NAME#v}
+        if [ "$TAG_VERSION" != "$PUBSPEC_VERSION" ]; then
+          echo "Error: Tag version ($TAG_VERSION) does not match pubspec version ($PUBSPEC_VERSION)"
+          exit 1
+        fi
+    
+    - name: Build Android APK
+      run: flutter build apk --release
+      
+    - name: Build Android App Bundle
+      run: flutter build appbundle --release
+      
+    - name: Build iOS
+      if: runner.os == 'macos'
+      run: flutter build ios --release --no-codesign
+      
+    - name: Build Web
+      run: flutter build web --release
+      
+    - name: Build Windows
+      run: flutter build windows --release
+      
+    - name: Build macOS
+      if: runner.os == 'macos'
+      run: flutter build macos --release
+      
+    - name: Build Linux
+      run: flutter build linux --release
+    
+    - name: Create release assets
+      run: |
+        mkdir -p release_assets
+        # Copy build outputs
+        cp build/app/outputs/flutter-apk/app-release.apk release_assets/neural_deck-${{ github.ref_name }}.apk
+        cp build/app/outputs/bundle/release/app-release.aab release_assets/neural_deck-${{ github.ref_name }}.aab
+        # Create web zip
+        cd build/web && zip -r ../../release_assets/neural_deck-${{ github.ref_name }}-web.zip . && cd ../..
+        # Create checksums
+        cd release_assets && sha256sum * > checksums.txt
+    
+    - name: Create GitHub Release
+      uses: softprops/action-gh-release@v1
+      with:
+        files: release_assets/*
+        generate_release_notes: true
+        prerelease: false
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
