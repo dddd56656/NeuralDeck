@@ -46,11 +46,7 @@
 ---
 
 ## 🛠️ 架构图
-<<<<<<< HEAD
 
-
-
-=======
 <img width="8192" height="5722" alt="Untitled diagram-2026-01-24-095615" src="https://github.com/user-attachments/assets/0c52ef5d-0451-4c1e-b49c-288e5d3b755b" />
 >>>>>>> d9361bc2ddb112750ffd0336cc87f1e40bf790b9
 
