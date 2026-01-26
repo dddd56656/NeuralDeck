@@ -1,29 +1,16 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart'; // 用于控制状态栏颜色
 import 'package:google_fonts/google_fonts.dart';
-import 'package:window_manager/window_manager.dart'; // 新增: 窗口管理
 
-void main() async {
-  // 修改: 变成 async
+void main() {
+  // 确保系统绑定初始化
   WidgetsFlutterBinding.ensureInitialized();
-
-  // === 桌面端窗口初始化 ===
-  try {
-    await windowManager.ensureInitialized();
-    WindowOptions windowOptions = const WindowOptions(
-      size: Size(450, 850), // 模拟手机/垂直终端的比例
-      center: true,
-      backgroundColor: Colors.transparent,
-      skipTaskbar: false,
-      titleBarStyle: TitleBarStyle.hidden, // 无边框模式，更科幻
-    );
-    await windowManager.waitUntilReadyToShow(windowOptions, () async {
-      await windowManager.show();
-      await windowManager.focus();
-    });
-  } catch (e) {
-    // 如果是在手机运行，这块会报错或跳过，不用管
-    print("Not running on desktop or window_manager failed: $e");
-  }
+  
+  // 强制竖屏 (手机 App 的常规操作)
+  SystemChrome.setPreferredOrientations([
+    DeviceOrientation.portraitUp,
+    DeviceOrientation.portraitDown,
+  ]);
 
   runApp(const NeuralDeckApp());
 }
@@ -37,9 +24,8 @@ class NeuralDeckApp extends StatelessWidget {
       title: 'NeuralDeck',
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
-        // === 赛博朋克暗黑主题 ===
+        // === 赛博朋克移动端主题 ===
         brightness: Brightness.dark,
-        // ↓↓↓↓↓ 这里修复了你的那个方块问题 ↓↓↓↓↓
         scaffoldBackgroundColor: const Color(0xFF050505),
         primaryColor: const Color(0xFF00F0FF),
         colorScheme: const ColorScheme.dark(
@@ -55,80 +41,98 @@ class NeuralDeckApp extends StatelessWidget {
           ),
         ),
       ),
-      home: const SystemBootScreen(),
+      home: const MobileTerminalScreen(),
     );
   }
 }
 
-class SystemBootScreen extends StatelessWidget {
-  const SystemBootScreen({super.key});
+class MobileTerminalScreen extends StatefulWidget {
+  const MobileTerminalScreen({super.key});
+
+  @override
+  State<MobileTerminalScreen> createState() => _MobileTerminalScreenState();
+}
+
+class _MobileTerminalScreenState extends State<MobileTerminalScreen> {
+  int _currentIndex = 1; // 默认选中中间的“生成”页面
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      // 加一个简单的关闭按钮，因为我们把标题栏隐藏了
+      // 顶部简单的状态栏
       appBar: AppBar(
         backgroundColor: Colors.transparent,
         elevation: 0,
+        title: const Text("NEURAL DECK", style: TextStyle(letterSpacing: 3, fontSize: 18)),
+        centerTitle: true,
         actions: [
           IconButton(
-            icon: const Icon(Icons.close, color: Colors.grey),
-            onPressed: () {
-              // 只有桌面端需要手动关闭
-              // SystemNavigator.pop() 在 iOS/Android
-              // exit(0) 在桌面
-            },
-          ),
+            icon: const Icon(Icons.hub, color: Color(0xFF00F0FF)),
+            onPressed: () {}, // 这里以后放设置
+          )
         ],
       ),
+      
+      // 中间的主体内容
       body: Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Container(
-              width: 100,
-              height: 100,
-              decoration: BoxDecoration(
-                border: Border.all(color: const Color(0xFF00F0FF), width: 2),
-                shape: BoxShape.circle,
-                boxShadow: [
-                  BoxShadow(
-                    color: const Color(0xFF00F0FF).withOpacity(0.5),
-                    blurRadius: 20,
-                  ),
-                ],
-              ),
-              child: const Icon(Icons.hub, size: 50, color: Color(0xFF00F0FF)),
-            ),
-            const SizedBox(height: 40),
-            const Text(
-              "NEURAL DECK",
-              style: TextStyle(
-                fontSize: 32,
-                fontWeight: FontWeight.bold,
-                letterSpacing: 5,
-              ),
-            ),
-            const SizedBox(height: 10),
-            const Text(
-              "DESKTOP TERMINAL", // 改个字，体现你是桌面版
-              style: TextStyle(
-                fontSize: 12,
-                color: Colors.grey,
-                letterSpacing: 2,
-              ),
-            ),
-            const SizedBox(height: 50),
-            SizedBox(
-              width: 200,
-              child: LinearProgressIndicator(
-                backgroundColor: Colors.grey[900],
-                color: const Color(0xFFFF003C),
-              ),
-            ),
+        child: _buildBody(),
+      ),
+
+      // 底部导航栏 (Bottom Navigation)
+      bottomNavigationBar: Container(
+        decoration: BoxDecoration(
+          border: Border(top: BorderSide(color: const Color(0xFF00F0FF).withOpacity(0.3))),
+          color: Colors.black,
+        ),
+        child: BottomNavigationBar(
+          currentIndex: _currentIndex,
+          onTap: (index) => setState(() => _currentIndex = index),
+          backgroundColor: Colors.transparent,
+          selectedItemColor: const Color(0xFF00F0FF),
+          unselectedItemColor: Colors.grey,
+          type: BottomNavigationBarType.fixed,
+          items: const [
+            BottomNavigationBarItem(icon: Icon(Icons.history), label: 'LOGS'),
+            BottomNavigationBarItem(icon: Icon(Icons.qr_code_scanner, size: 32), label: 'SCAN'), // 中间大一点
+            BottomNavigationBarItem(icon: Icon(Icons.analytics), label: 'DIAG'),
           ],
         ),
       ),
     );
+  }
+
+  // 简单的页面切换逻辑
+  Widget _buildBody() {
+    switch (_currentIndex) {
+      case 0:
+        return const Text("HISTORY LOGS\n[Offline]", textAlign: TextAlign.center);
+      case 1:
+        return Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            // 全息光圈
+            Container(
+              width: 180,
+              height: 180,
+              decoration: BoxDecoration(
+                border: Border.all(color: const Color(0xFF00F0FF), width: 2),
+                shape: BoxShape.circle,
+                boxShadow: [
+                  BoxShadow(color: const Color(0xFF00F0FF).withOpacity(0.4), blurRadius: 30)
+                ],
+              ),
+              child: const Icon(Icons.touch_app, size: 60, color: Color(0xFF00F0FF)),
+            ),
+            const SizedBox(height: 40),
+            const Text("SYSTEM READY", style: TextStyle(fontSize: 20, letterSpacing: 5)),
+            const SizedBox(height: 10),
+            const Text("Tap 'SCAN' to Initialize", style: TextStyle(fontSize: 12, color: Colors.grey)),
+          ],
+        );
+      case 2:
+        return const Text("DIAGNOSTICS\n[No Data]", textAlign: TextAlign.center);
+      default:
+        return Container();
+    }
   }
 }
