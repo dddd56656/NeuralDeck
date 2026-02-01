@@ -1,12 +1,23 @@
-import 'package:flutter/material.dart';
-import 'package:flutter/services.dart'; // 用于控制状态栏颜色
-import 'package:google_fonts/google_fonts.dart';
+// 文件: lib/main.dart
 
-void main() {
-  // 确保系统绑定初始化
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'core/services/local_db.dart';
+import 'core/services/brain_service.dart';
+import 'core/theme/cyberpunk_theme.dart';
+import 'modules/deck/screens/scanner_screen.dart';
+import 'modules/deck/screens/card_detail_screen.dart';
+
+void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  
-  // 强制竖屏 (手机 App 的常规操作)
+
+  try {
+    await LocalDB.instance.database;
+    await BrainService().init();
+  } catch (e) {
+    print("CRITICAL: Services failed to start: $e");
+  }
+
   SystemChrome.setPreferredOrientations([
     DeviceOrientation.portraitUp,
     DeviceOrientation.portraitDown,
@@ -23,24 +34,7 @@ class NeuralDeckApp extends StatelessWidget {
     return MaterialApp(
       title: 'NeuralDeck',
       debugShowCheckedModeBanner: false,
-      theme: ThemeData(
-        // === 赛博朋克移动端主题 ===
-        brightness: Brightness.dark,
-        scaffoldBackgroundColor: const Color(0xFF050505),
-        primaryColor: const Color(0xFF00F0FF),
-        colorScheme: const ColorScheme.dark(
-          primary: Color(0xFF00F0FF),
-          secondary: Color(0xFFFF003C),
-          surface: Color(0xFF121212),
-        ),
-        useMaterial3: true,
-        textTheme: GoogleFonts.orbitronTextTheme(
-          Theme.of(context).textTheme.apply(
-            bodyColor: const Color(0xFFE0E0E0),
-            displayColor: const Color(0xFF00F0FF),
-          ),
-        ),
-      ),
+      theme: CyberpunkTheme.themeData,
       home: const MobileTerminalScreen(),
     );
   }
@@ -54,34 +48,36 @@ class MobileTerminalScreen extends StatefulWidget {
 }
 
 class _MobileTerminalScreenState extends State<MobileTerminalScreen> {
-  int _currentIndex = 1; // 默认选中中间的“生成”页面
+  int _currentIndex = 1;
+
+  final List<Widget> _pages = [
+    const _LogsPage(),
+    const ScannerScreen(),
+    const _DiagnosticsPage(),
+  ];
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      // 顶部简单的状态栏
       appBar: AppBar(
-        backgroundColor: Colors.transparent,
-        elevation: 0,
-        title: const Text("NEURAL DECK", style: TextStyle(letterSpacing: 3, fontSize: 18)),
+        title: const Text(
+          "神经终端 v1.0", // [汉化]
+          style: TextStyle(letterSpacing: 2, fontSize: 18),
+        ),
         centerTitle: true,
         actions: [
           IconButton(
             icon: const Icon(Icons.hub, color: Color(0xFF00F0FF)),
-            onPressed: () {}, // 这里以后放设置
-          )
+            onPressed: () {},
+          ),
         ],
       ),
-      
-      // 中间的主体内容
-      body: Center(
-        child: _buildBody(),
-      ),
-
-      // 底部导航栏 (Bottom Navigation)
+      body: IndexedStack(index: _currentIndex, children: _pages),
       bottomNavigationBar: Container(
         decoration: BoxDecoration(
-          border: Border(top: BorderSide(color: const Color(0xFF00F0FF).withOpacity(0.3))),
+          border: Border(
+            top: BorderSide(color: const Color(0xFF00F0FF).withOpacity(0.3)),
+          ),
           color: Colors.black,
         ),
         child: BottomNavigationBar(
@@ -92,47 +88,149 @@ class _MobileTerminalScreenState extends State<MobileTerminalScreen> {
           unselectedItemColor: Colors.grey,
           type: BottomNavigationBarType.fixed,
           items: const [
-            BottomNavigationBarItem(icon: Icon(Icons.history), label: 'LOGS'),
-            BottomNavigationBarItem(icon: Icon(Icons.qr_code_scanner, size: 32), label: 'SCAN'), // 中间大一点
-            BottomNavigationBarItem(icon: Icon(Icons.analytics), label: 'DIAG'),
+            BottomNavigationBarItem(
+              icon: Icon(Icons.history),
+              label: '历史记录',
+            ), // [汉化]
+            BottomNavigationBarItem(
+              icon: Icon(Icons.qr_code_scanner, size: 32),
+              label: '扫描',
+            ), // [汉化]
+            BottomNavigationBarItem(
+              icon: Icon(Icons.analytics),
+              label: '系统诊断',
+            ), // [汉化]
           ],
         ),
       ),
     );
   }
+}
 
-  // 简单的页面切换逻辑
-  Widget _buildBody() {
-    switch (_currentIndex) {
-      case 0:
-        return const Text("HISTORY LOGS\n[Offline]", textAlign: TextAlign.center);
-      case 1:
-        return Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            // 全息光圈
-            Container(
-              width: 180,
-              height: 180,
+class _LogsPage extends StatefulWidget {
+  const _LogsPage();
+
+  @override
+  State<_LogsPage> createState() => _LogsPageState();
+}
+
+class _LogsPageState extends State<_LogsPage> {
+  late Future<List<Map<String, dynamic>>> _logsFuture;
+
+  @override
+  void initState() {
+    super.initState();
+    _refreshLogs();
+  }
+
+  void _refreshLogs() {
+    setState(() {
+      _logsFuture = LocalDB.instance.queryAll('cards');
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return FutureBuilder<List<Map<String, dynamic>>>(
+      future: _logsFuture,
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return const Center(
+            child: CircularProgressIndicator(color: Color(0xFF00F0FF)),
+          );
+        }
+        if (!snapshot.hasData || snapshot.data!.isEmpty) {
+          return const Center(
+            child: Text(
+              "暂无数据记录",
+              style: TextStyle(color: Colors.grey, letterSpacing: 2),
+            ), // [汉化]
+          );
+        }
+
+        final logs = snapshot.data!;
+        return ListView.builder(
+          itemCount: logs.length,
+          padding: const EdgeInsets.all(16),
+          itemBuilder: (context, index) {
+            final log = logs[index];
+            return Container(
+              margin: const EdgeInsets.only(bottom: 8),
               decoration: BoxDecoration(
-                border: Border.all(color: const Color(0xFF00F0FF), width: 2),
-                shape: BoxShape.circle,
-                boxShadow: [
-                  BoxShadow(color: const Color(0xFF00F0FF).withOpacity(0.4), blurRadius: 30)
-                ],
+                color: const Color(0xFF121212),
+                border: Border(
+                  left: BorderSide(
+                    color: const Color(0xFF00F0FF).withOpacity(0.5),
+                    width: 2,
+                  ),
+                ),
               ),
-              child: const Icon(Icons.touch_app, size: 60, color: Color(0xFF00F0FF)),
-            ),
-            const SizedBox(height: 40),
-            const Text("SYSTEM READY", style: TextStyle(fontSize: 20, letterSpacing: 5)),
-            const SizedBox(height: 10),
-            const Text("Tap 'SCAN' to Initialize", style: TextStyle(fontSize: 12, color: Colors.grey)),
-          ],
+              child: ListTile(
+                leading: const Icon(
+                  Icons.data_object,
+                  color: Colors.grey,
+                  size: 20,
+                ),
+                title: Text(
+                  (log['translated_text'] as String? ?? '未知目标')
+                      .split('\n')
+                      .first,
+                  style: const TextStyle(
+                    fontFamily: 'Courier',
+                    fontSize: 14,
+                    color: Colors.white,
+                  ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+                subtitle: Text(
+                  "编号: ${log['id']} | ${DateTime.fromMillisecondsSinceEpoch(log['created_at'] as int).toString().split('.')[0]}",
+                  style: TextStyle(fontSize: 10, color: Colors.grey[600]),
+                ),
+                dense: true,
+                onTap: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (context) => CardDetailScreen(
+                        rawText: log['raw_text'],
+                        translatedText: log['translated_text'],
+                      ),
+                    ),
+                  );
+                },
+              ),
+            );
+          },
         );
-      case 2:
-        return const Text("DIAGNOSTICS\n[No Data]", textAlign: TextAlign.center);
-      default:
-        return Container();
-    }
+      },
+    );
+  }
+}
+
+class _DiagnosticsPage extends StatelessWidget {
+  const _DiagnosticsPage();
+
+  @override
+  Widget build(BuildContext context) {
+    return const Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(Icons.analytics_outlined, size: 64, color: Color(0xFFFF003C)),
+          SizedBox(height: 16),
+          Text(
+            "系统状态监控",
+            style: TextStyle(letterSpacing: 2, fontSize: 16),
+          ), // [汉化]
+          SizedBox(height: 8),
+          Text(
+            "CPU核心: 正常运转\n神经内存: 状态极佳\n网络连接: 已断开 (离线模式)", // [汉化] 强调离线
+            textAlign: TextAlign.center,
+            style: TextStyle(color: Colors.grey, height: 1.5),
+          ),
+        ],
+      ),
+    );
   }
 }
