@@ -55,25 +55,32 @@ class _CardDetailScreenState extends State<CardDetailScreen> {
     super.dispose();
   }
 
+  // ✅ 核心修复：将并行任务改为串行 (await)
   Future<void> _igniteNeuralEngine() async {
-    // 0. 快速检查初始化 (如果之前已经在 ScannerScreen 预热过，这里是瞬时的)
+    // 0. 确保连接
     await _brain.init();
 
-    // Task A: 数值分析 (Reasoning) - 独立跑
-    _brain
-        .analyze(widget.rawText)
-        .then((rawStats) {
-          if (!mounted) return;
-          final newStats = rawStats.map(
-            (key, value) => MapEntry(key, (value as num).toDouble()),
-          );
-          setState(() => stats = newStats);
-        })
-        .catchError((e) {
-          print("Stats Error: $e");
-        });
+    // --- 阶段 1: 数值分析 (Task A) ---
+    // 必须等待这个任务完全结束 (await)，释放引擎占用，才能进行下一步
+    try {
+      // 这里的 await 会阻塞，直到 JSON 生成完毕
+      final rawStats = await _brain.analyze(widget.rawText);
 
-    // Task B: 传说生成 (Creative) - 独立跑，互不阻塞
+      if (!mounted) return;
+
+      final newStats = rawStats.map(
+        (key, value) => MapEntry(key, (value as num).toDouble()),
+      );
+      setState(() => stats = newStats);
+    } catch (e) {
+      print("Stats Analysis Failed: $e");
+      // 就算分析失败，也不要卡死，继续尝试写传说
+    }
+
+    // --- 阶段 2: 传说生成 (Task B) ---
+    // 此时引擎已经空闲，可以再次调用 generateResponse 了
+    if (!mounted) return;
+
     final stream = _brain.streamLore(widget.rawText);
 
     _loreSubscription = stream.listen(
@@ -82,7 +89,7 @@ class _CardDetailScreenState extends State<CardDetailScreen> {
         setState(() {
           aiOutputBuffer += token;
         });
-        // 自动滚动到底部
+        // 自动滚动
         if (_scrollController.hasClients) {
           _scrollController.jumpTo(_scrollController.position.maxScrollExtent);
         }

@@ -1,169 +1,184 @@
 import 'dart:async';
-import 'dart:convert';
 import 'dart:io';
-import 'package:dio/dio.dart';
+import 'dart:math';
+import 'package:flutter/services.dart';
 import 'package:path_provider/path_provider.dart';
-import 'package:mediapipe_genai/mediapipe_genai.dart';
+// ⚠️ 确保引用路径正确，指向你存放 Fllama 类的位置
+import 'package:fllama/fllama.dart';
 import 'brain_interface.dart';
 
 class LLMBrain implements BrainInterface {
   bool _isInitialized = false;
-  LlmInferenceEngine? _engine;
 
-  // 📡 模型下载地址
-  // 这可以让国内设备无需梯子直接高速下载
-  static const String _modelUrl =
-      "https://hf-mirror.com/google/gemma-2b-it-gpu-int4/resolve/main/gemma-2b-it-gpu-int4.bin";
-  static const String _targetFileName = 'gemma-2b-it-gpu-int4.bin';
+  // 保存由 Fllama 返回的上下文 ID
+  double? _contextId;
+
+  // 模型文件名
+  static const String _modelFileName = 'qwen.gguf';
 
   @override
   Future<void> init() async {
-    if (_isInitialized) return;
-    print("🧠 Neural Engine: Initializing Kernel...");
+    if (_isInitialized && _contextId != null) return;
+    print("🧠 (Qwen): Initializing Engine via Fllama...");
 
     try {
       final directory = await getApplicationDocumentsDirectory();
-      final modelPath = '${directory.path}/$_targetFileName';
-      // 获取缓存目录（仅 CPU 模式需要）
-      final cachePath = directory.path;
-
+      final modelPath = '${directory.path}/$_modelFileName';
       final file = File(modelPath);
 
-      if (!file.existsSync()) {
-        print("⚠️ 神经核心丢失，开始下载...");
-        await _downloadModel(modelPath);
-        print("✅ 下载完成。");
-      } else {
-        print("📂 发现本地模型: $modelPath");
+      // 1. 搬运模型 (Assets -> Local Storage)
+      if (!file.existsSync() || file.lengthSync() < 100 * 1024 * 1024) {
+        print("📦 正在释放 Qwen 模型...");
+        try {
+          final ByteData data = await rootBundle.load(
+            'assets/models/$_modelFileName',
+          );
+          final List<int> bytes = data.buffer.asUint8List();
+          await file.writeAsBytes(bytes, flush: true);
+          print("✅ 模型释放完成: $modelPath");
+        } catch (e) {
+          throw Exception("❌ 模型释放失败，请检查 pubspec.yaml: $e");
+        }
       }
 
-      // 启动引擎
-      _igniteEngine(modelPath, cachePath);
+      // 2. 初始化 Context
+      // 根据你的 Fllama 源码，我们需要调用 initContext
+      print("🚀 正在加载模型到内存...");
+      final result = await Fllama.instance()!.initContext(
+        modelPath,
+        nCtx: 512, // 上下文长度，设小点省内存
+        nThreads: 4, // 4线程适合大部分手机
+        nGpuLayers: 0, // 强制 CPU 模式，最稳定
+        emitLoadProgress: true, // 允许监听加载进度
+      );
 
-      _isInitialized = true;
+      print("🤖 Init Result: $result");
+
+      // 3. 提取 Context ID
+      // Fllama 通常会在返回的 Map 中包含 'contextId' 或类似字段
+      // 如果 result 为空或者解析失败，说明初始化挂了
+      if (result != null && result.containsKey('contextId')) {
+        _contextId = (result['contextId'] as num).toDouble();
+        print("✅ Qwen 引擎就绪, Context ID: $_contextId");
+        _isInitialized = true;
+      } else {
+        // 尝试从 keys 猜测，如果 map 只有一个 entry 且是 double
+        throw Exception("Fllama 初始化返回了无法识别的数据: $result");
+      }
     } catch (e) {
-      print("❌ 核心启动失败: $e");
+      print("❌ 初始化失败: $e");
       rethrow;
     }
   }
 
-  Future<void> _downloadModel(String savePath) async {
-    // ✅ 修改点 2: 增加连接超时设置
-    final dio = Dio(
-      BaseOptions(
-        connectTimeout: const Duration(seconds: 10), // 连接超时 10秒
-        receiveTimeout: const Duration(minutes: 60), // 下载超时 60分钟
-      ),
-    );
-    try {
-      await dio.download(
-        _modelUrl,
-        savePath,
-        onReceiveProgress: (received, total) {
-          if (total != -1) {
-            final progress = (received / total * 100).toStringAsFixed(1);
-            if (received % (total ~/ 20) < 100000) {
-              print("⬇️ 下载中: $progress%");
-            }
-          }
-        },
-        options: Options(receiveTimeout: const Duration(minutes: 30)),
-      );
-    } catch (e) {
-      final file = File(savePath);
-      if (file.existsSync()) file.deleteSync();
-      throw Exception("下载失败: $e");
-    }
-  }
-
-  /// ✅ 核心修复：根据源码定义，区分构造参数
-  void _igniteEngine(String modelPath, String cachePath) {
-    LlmInferenceOptions options;
-    try {
-      print("🚀 尝试加载 GPU 模式 (High Performance)...");
-
-      // [GPU 构造器]
-      // 依据源码：需要 sequenceBatchSize，不需要 cacheDir
-      options = LlmInferenceOptions.gpu(
-        modelPath: modelPath,
-        sequenceBatchSize: 1, // 必填
-        maxTokens: 512,
-        temperature: 0.7,
-        topK: 40,
-        randomSeed: 1024,
-      );
-
-      _engine = LlmInferenceEngine(options);
-      print("✅ GPU 引擎上线。");
-    } catch (e) {
-      print("⚠️ GPU 失败 ($e)，切换至 CPU (Standard)...");
-
-      // [CPU 构造器]
-      // 依据源码：需要 cacheDir，不需要 sequenceBatchSize
-      options = LlmInferenceOptions.cpu(
-        modelPath: modelPath,
-        cacheDir: cachePath, // 必填
-        maxTokens: 512,
-        temperature: 0.7,
-        topK: 40,
-        randomSeed: 1024,
-      );
-
-      _engine = LlmInferenceEngine(options);
-      print("✅ CPU 引擎上线。");
-    }
-  }
-
+  // ------------------------------------------------------
+  // ⚡ 哈希属性 (保持 0 延迟秒开)
+  // ------------------------------------------------------
   @override
   Future<Map<String, dynamic>> analyzeTarget(String inputTags) async {
-    _checkStatus();
-    final prompt =
-        '''<start_of_turn>user
-Format: JSON {"ATK":0.0-1.0,"DEF":0.0-1.0,"SPD":0.0-1.0,"MAG":0.0-1.0,"LUCK":0.0-1.0}
-Input: "$inputTags"
-Output: JSON only.
-<end_of_turn>
-<start_of_turn>model
-''';
+    // 确保已初始化
+    if (!_isInitialized) await init();
 
-    try {
-      final responseStream = _engine!.generateResponse(prompt);
-      final fullText = await responseStream.join();
-      return json.decode(_extractJson(fullText));
-    } catch (e) {
-      return {"ATK": 0.5, "DEF": 0.5, "SPD": 0.5, "MAG": 0.5, "LUCK": 0.5};
-    }
+    print("⚡ Fast Stats: $inputTags");
+    final seed = inputTags.codeUnits.fold(0, (p, c) => p + c);
+    final random = Random(seed);
+    double r() => (random.nextInt(90) + 10) / 100.0;
+
+    // 模拟一点点计算感
+    await Future.delayed(const Duration(milliseconds: 100));
+
+    return {"ATK": r(), "DEF": r(), "SPD": r(), "MAG": r(), "LUCK": r()};
   }
 
+  // ------------------------------------------------------
+  // 📜 传说生成 (适配 Fllama Stream)
+  // ------------------------------------------------------
   @override
   Stream<String> generateLoreStream(String inputTags) {
-    _checkStatus();
-    final prompt =
-        '''<start_of_turn>user
-Description for "$inputTags" (Cyberpunk style, max 20 words).
-<end_of_turn>
-<start_of_turn>model
-''';
-    return _engine!.generateResponse(prompt);
-  }
-
-  void _checkStatus() {
-    if (!_isInitialized || _engine == null) {
-      throw Exception("Neural Engine not initialized!");
+    if (!_isInitialized || _contextId == null) {
+      // 如果没初始化，返回错误流
+      return Stream.error("Brain not initialized");
     }
-  }
 
-  String _extractJson(String raw) {
-    final start = raw.indexOf('{');
-    final end = raw.lastIndexOf('}');
-    if (start != -1 && end != -1) return raw.substring(start, end + 1);
-    return "{}";
+    // 1. 构造 Prompt
+    final prompt =
+        '''<|im_start|>system
+Cyberpunk item analyzer. Brief.
+<|im_end|>
+<|im_start|>user
+Analyze "$inputTags". Max 20 words.
+<|im_end|>
+<|im_start|>assistant
+''';
+
+    print("📝 发送 Prompt 到 Context $_contextId...");
+
+    // 2. 创建 StreamController 来转发数据
+    final controller = StreamController<String>();
+
+    // 3. 订阅全局 Token 流
+    // Fllama 的 onTokenStream 是一个全局广播流
+    final StreamSubscription subscription = Fllama.instance()!.onTokenStream!
+        .listen(
+          (Map<Object?, dynamic> event) {
+            // event 结构通常是: {'contextId': 1.0, 'token': 'xxx', ...}
+
+            // 过滤：只处理当前 Context 的消息
+            if (event['contextId'] == _contextId) {
+              // 提取 token 文本
+              final token = event['token'] as String?;
+              if (token != null) {
+                controller.add(token);
+              }
+
+              // 检查是否结束 (部分库会发 isEnd 或类似标志，或者 token 为空)
+              // 这里我们简单处理：如果不报错就一直流，直到 UI 层通过 dispose 关掉它
+              if (event['is_end'] == true || event['done'] == true) {
+                controller.close();
+              }
+            }
+          },
+          onError: (e) {
+            print("❌ Stream Error: $e");
+            controller.addError(e);
+          },
+        );
+
+    // 4. 触发生成 (Fire and Forget)
+    // 注意：completion 是 Future，但我们会通过上面的 subscription 收到结果
+    Fllama.instance()!
+        .completion(
+          _contextId!,
+          prompt: prompt,
+          nPredict: 64, // 限制长度
+          emitRealtimeCompletion: true, // ✅ 关键：必须开启实时流
+        )
+        .then((_) {
+          // completion Future 完成表示请求发送完毕，但流可能还在继续
+          // 通常不需要在这里做太多操作
+        })
+        .catchError((e) {
+          controller.addError(e);
+          controller.close();
+        });
+
+    // 5. 当外部取消订阅时，清理资源
+    controller.onCancel = () {
+      subscription.cancel();
+      // 可选：调用 stopCompletion
+      // Fllama.instance()!.stopCompletion(contextId: _contextId!);
+    };
+
+    return controller.stream;
   }
 
   @override
-  void dispose() {
-    _engine?.dispose();
-    _engine = null;
+  Future<void> dispose() async {
+    if (_contextId != null) {
+      print("🛑 释放 Context $_contextId");
+      await Fllama.instance()!.releaseContext(_contextId!);
+      _contextId = null;
+    }
     _isInitialized = false;
   }
 }

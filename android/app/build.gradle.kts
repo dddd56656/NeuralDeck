@@ -28,6 +28,10 @@ android {
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode
         versionName = flutter.versionName
+        // ⚠️ 强制 ARM64 架构，解决 Llama.cpp 找不到库的问题
+        ndk {
+            abiFilters.add("arm64-v8a")
+        }
     }
 
     buildTypes {
@@ -37,12 +41,10 @@ android {
             signingConfig = signingConfigs.getByName("debug")
         }
     }
-    // 🔥🔥🔥 [Google CTO 关键修改] 🔥🔥🔥
-    // 禁止压缩 .bin 模型文件。
-    // 这行代码是解决 1.5GB 模型加载卡死/OOM 问题的唯一钥匙。
-    // 在 Kotlin DSL 中，必须使用 "+=" 来追加扩展名。
-    aaptOptions {
-        noCompress += "bin"
+    // 防止 .gguf 模型被压缩损坏
+    androidResources {
+        noCompress.add("gguf")
+        noCompress.add("bin")
     }
 }
 
