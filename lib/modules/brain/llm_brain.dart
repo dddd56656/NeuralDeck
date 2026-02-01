@@ -11,9 +11,9 @@ class LLMBrain implements BrainInterface {
   LlmInferenceEngine? _engine;
 
   // 📡 模型下载地址
+  // 这可以让国内设备无需梯子直接高速下载
   static const String _modelUrl =
-      "https://huggingface.co/google/gemma-2b-it-gpu-int4/resolve/main/gemma-2b-it-gpu-int4.bin";
-
+      "https://hf-mirror.com/google/gemma-2b-it-gpu-int4/resolve/main/gemma-2b-it-gpu-int4.bin";
   static const String _targetFileName = 'gemma-2b-it-gpu-int4.bin';
 
   @override
@@ -48,7 +48,13 @@ class LLMBrain implements BrainInterface {
   }
 
   Future<void> _downloadModel(String savePath) async {
-    final dio = Dio();
+    // ✅ 修改点 2: 增加连接超时设置
+    final dio = Dio(
+      BaseOptions(
+        connectTimeout: const Duration(seconds: 10), // 连接超时 10秒
+        receiveTimeout: const Duration(minutes: 60), // 下载超时 60分钟
+      ),
+    );
     try {
       await dio.download(
         _modelUrl,
