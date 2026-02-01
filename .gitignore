@@ -44,4 +44,4 @@ app.*.map.json
 /android/app/profile
 /android/app/release
 # [Google CTO] Ignore Large AI Models
-assets/models/*.binassets/models/gemma-2b-it-gpu-int4.bin
+assets
