@@ -1,3 +1,5 @@
+// 在文件头部引入 async
+import 'dart:async';
 import 'package:sqflite/sqflite.dart';
 import 'package:path/path.dart';
 
@@ -11,25 +13,27 @@ class LocalDB {
   // 2. 数据库实例，使用 getter 确保安全访问
   Database? _database;
 
-  // 锁机制：防止多个线程同时初始化数据库
-  bool _isInitializing = false;
+  // ✅ 替换原来的 bool _isInitializing
+  Completer<Database>? _dbCompleter;
 
-  /// 获取数据库实例的异步 Getter
-  /// 遵循 Google 风格：将初始化逻辑封装在访问器内，调用者无需手动调用 init()
+  // ✅ 替换原来的 database getter
   Future<Database> get database async {
     if (_database != null) return _database!;
 
-    // 简单的并发保护
-    if (_isInitializing) {
-      while (_database == null) {
-        await Future.delayed(const Duration(milliseconds: 100));
-      }
-      return _database!;
+    if (_dbCompleter != null) {
+      return _dbCompleter!.future;
     }
 
-    _isInitializing = true;
-    _database = await _initDatabase();
-    _isInitializing = false;
+    _dbCompleter = Completer<Database>();
+
+    try {
+      _database = await _initDatabase();
+      _dbCompleter!.complete(_database);
+    } catch (e) {
+      _dbCompleter!.completeError(e);
+      _dbCompleter = null;
+      rethrow;
+    }
     return _database!;
   }
 
