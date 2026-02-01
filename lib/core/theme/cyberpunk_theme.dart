@@ -7,7 +7,11 @@ class CyberpunkTheme {
   static const Color neonRed = Color(0xFFFF003C); // 警告/高亮
   static const Color darkBg = Color(0xFF050505); // 纯黑背景
   static const Color surfaceBg = Color(0xFF121212); // 卡片背景
+  // ✅ [新增] 修复报错：添加黑客终端绿
+  // 这种高饱和度的绿色是 CRT 显示器的经典色
+  static const Color neonGreen = Color(0xFF39FF14);
 
+  static const Color backgroundBlack = Color(0xFF121212);
   // 获取全局主题配置
   static ThemeData get themeData {
     // 基础暗色主题

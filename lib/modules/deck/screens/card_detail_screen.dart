@@ -1,3 +1,4 @@
+import 'dart:async'; // 引入 Async
 import 'package:flutter/material.dart';
 import '../../../core/theme/cyberpunk_theme.dart';
 import '../../../core/services/brain_service.dart';
@@ -21,46 +22,79 @@ class CardDetailScreen extends StatefulWidget {
 
 class _CardDetailScreenState extends State<CardDetailScreen> {
   String aiOutputBuffer = "";
-  bool isAnalyzing = true;
+  bool isAnalyzing = true; // 仅用于控制顶部图标动画
+
+  // 订阅句柄 (用于页面销毁时取消流)
+  StreamSubscription? _loreSubscription;
+
   Map<String, double> stats = {
-    'ATK': 0.1,
-    'DEF': 0.1,
-    'SPD': 0.1,
-    'MAG': 0.1,
-    'LUCK': 0.1,
+    'ATK': 0.0,
+    'DEF': 0.0,
+    'SPD': 0.0,
+    'MAG': 0.0,
+    'LUCK': 0.0,
   };
 
   final BrainService _brain = BrainService();
   final TTSService _tts = TTSService();
+  final ScrollController _scrollController = ScrollController(); // 控制文字滚动
 
   @override
   void initState() {
     super.initState();
-    _startFullAnalysis();
+    // 启动并行任务
+    _igniteNeuralEngine();
   }
 
   @override
   void dispose() {
+    // 🛑 必须操作：取消 AI 生成流，防止内存泄露
+    _loreSubscription?.cancel();
     _tts.stop();
+    _scrollController.dispose();
     super.dispose();
   }
 
-  Future<void> _startFullAnalysis() async {
+  Future<void> _igniteNeuralEngine() async {
+    // 0. 快速检查初始化 (如果之前已经在 ScannerScreen 预热过，这里是瞬时的)
     await _brain.init();
-    final newStats = _brain.analyzeStats(widget.rawText);
-    if (!mounted) return;
-    setState(() => stats = newStats);
 
-    final stream = _brain.generateLore(widget.rawText, widget.translatedText);
-    stream.listen(
+    // Task A: 数值分析 (Reasoning) - 独立跑
+    _brain
+        .analyze(widget.rawText)
+        .then((rawStats) {
+          if (!mounted) return;
+          final newStats = rawStats.map(
+            (key, value) => MapEntry(key, (value as num).toDouble()),
+          );
+          setState(() => stats = newStats);
+        })
+        .catchError((e) {
+          print("Stats Error: $e");
+        });
+
+    // Task B: 传说生成 (Creative) - 独立跑，互不阻塞
+    final stream = _brain.streamLore(widget.rawText);
+
+    _loreSubscription = stream.listen(
       (token) {
         if (!mounted) return;
-        setState(() => aiOutputBuffer += token);
+        setState(() {
+          aiOutputBuffer += token;
+        });
+        // 自动滚动到底部
+        if (_scrollController.hasClients) {
+          _scrollController.jumpTo(_scrollController.position.maxScrollExtent);
+        }
       },
       onDone: () {
         if (!mounted) return;
         setState(() => isAnalyzing = false);
         _tts.speak(aiOutputBuffer);
+      },
+      onError: (e) {
+        if (!mounted) return;
+        setState(() => aiOutputBuffer = ">> 神经链路中断: $e");
       },
     );
   }
@@ -70,78 +104,139 @@ class _CardDetailScreenState extends State<CardDetailScreen> {
     return Scaffold(
       backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       appBar: AppBar(
-        title: const Text("数据解密完成"), // [汉化]
+        title: const Text("DATA DECRYPTED"),
+        centerTitle: true,
         leading: IconButton(
-          icon: const Icon(Icons.arrow_back_ios),
+          icon: const Icon(
+            Icons.arrow_back_ios,
+            color: CyberpunkTheme.neonBlue,
+          ),
           onPressed: () => Navigator.pop(context),
         ),
       ),
       body: SingleChildScrollView(
         child: Column(
           children: [
+            // --- 顶部状态栏 (Header) ---
             Container(
-              height: 250,
+              height: 220,
               width: double.infinity,
-              color: Colors.black,
+              decoration: BoxDecoration(
+                color: Colors.black,
+                border: Border(
+                  bottom: BorderSide(
+                    color: CyberpunkTheme.neonBlue.withOpacity(0.3),
+                  ),
+                ),
+              ),
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  const Icon(
-                    Icons.face_retouching_natural,
-                    size: 80,
-                    color: CyberpunkTheme.neonBlue,
+                  // 动态图标：分析中闪烁，分析完常亮
+                  AnimatedContainer(
+                    duration: const Duration(milliseconds: 500),
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      boxShadow: isAnalyzing
+                          ? [
+                              BoxShadow(
+                                color: CyberpunkTheme.neonBlue.withOpacity(0.5),
+                                blurRadius: 20,
+                                spreadRadius: 5,
+                              ),
+                            ]
+                          : [],
+                    ),
+                    child: Icon(
+                      Icons.hub, // 换成神经网络图标
+                      size: 80,
+                      color: isAnalyzing
+                          ? Colors.white
+                          : CyberpunkTheme.neonBlue,
+                    ),
                   ),
-                  const SizedBox(height: 10),
+                  const SizedBox(height: 15),
                   Text(
-                    isAnalyzing ? "神经链路连接中..." : "分析报告生成完毕", // [汉化]
-                    style: const TextStyle(
-                      color: CyberpunkTheme.neonBlue,
-                      letterSpacing: 1,
+                    isAnalyzing ? "NEURAL LINK ACTIVE..." : "ANALYSIS COMPLETE",
+                    style: TextStyle(
+                      fontFamily: 'Courier',
+                      fontWeight: FontWeight.bold,
+                      color: isAnalyzing
+                          ? Colors.white70
+                          : CyberpunkTheme.neonBlue,
+                      letterSpacing: 2,
                     ),
                   ),
                   if (isAnalyzing)
-                    const Padding(
-                      padding: EdgeInsets.only(top: 20),
-                      child: SizedBox(
-                        width: 100,
-                        child: LinearProgressIndicator(
-                          color: CyberpunkTheme.neonRed,
-                        ),
+                    Padding(
+                      padding: const EdgeInsets.only(
+                        top: 15,
+                        left: 50,
+                        right: 50,
+                      ),
+                      child: LinearProgressIndicator(
+                        backgroundColor: Colors.white10,
+                        color: CyberpunkTheme.neonRed,
                       ),
                     ),
                 ],
               ),
             ),
-            HolographicCard(
-              title: "目标解析", // [汉化]
-              description: "数据源: ${widget.rawText}", // [汉化]
-              child: Row(
-                children: [
-                  Expanded(flex: 4, child: StatsRadar(stats: stats, size: 140)),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    flex: 6,
-                    child: Container(
-                      height: 140,
-                      padding: const EdgeInsets.all(8),
+
+            // --- 全息卡片 (Content) ---
+            Padding(
+              padding: const EdgeInsets.all(16.0),
+              child: HolographicCard(
+                title: "TARGET ANALYSIS",
+                description: widget.rawText.length > 50
+                    ? "${widget.rawText.substring(0, 50)}..." // 截断过长的 Payload
+                    : widget.rawText,
+                child: Column(
+                  // 改成 Column 布局以适应手机屏幕
+                  children: [
+                    // 1. 雷达图
+                    SizedBox(
+                      height: 200,
+                      child: StatsRadar(stats: stats, size: 180),
+                    ),
+
+                    const SizedBox(height: 20),
+                    const Divider(color: Colors.white24),
+                    const SizedBox(height: 10),
+
+                    // 2. 文本生成区 (Terminal 风格)
+                    Container(
+                      width: double.infinity,
+                      height: 150,
+                      padding: const EdgeInsets.all(12),
                       decoration: BoxDecoration(
-                        color: Colors.white.withOpacity(0.05),
+                        color: Colors.black54,
+                        border: Border.all(color: Colors.white12),
+                        borderRadius: BorderRadius.circular(4),
                       ),
                       child: SingleChildScrollView(
-                        reverse: true,
+                        controller: _scrollController,
                         child: Text(
-                          aiOutputBuffer,
+                          aiOutputBuffer.isEmpty
+                              ? ">> Waiting for neural stream..."
+                              : aiOutputBuffer,
                           style: const TextStyle(
                             fontFamily: 'Courier',
-                            fontSize: 13,
-                            color: Colors.white,
-                            height: 1.4,
+                            fontSize: 14,
+                            color: CyberpunkTheme.neonGreen, // 终端绿
+                            height: 1.5,
+                            shadows: [
+                              Shadow(
+                                color: CyberpunkTheme.neonGreen,
+                                blurRadius: 5,
+                              ),
+                            ],
                           ),
                         ),
                       ),
                     ),
-                  ),
-                ],
+                  ],
+                ),
               ),
             ),
           ],

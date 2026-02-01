@@ -1,107 +1,159 @@
 import 'dart:async';
-import 'dart:math';
+import 'dart:convert';
+import 'dart:io';
+import 'package:flutter/services.dart' show rootBundle;
+import 'package:path_provider/path_provider.dart';
+// 确保这里引用的是你查阅源码的那个包
+import 'package:mediapipe_genai/mediapipe_genai.dart';
 import 'brain_interface.dart';
 
 /// [LLMBrain]
-/// 离线专家系统 (Expert System AI) - 中文版
-/// 100% 离线，无崩溃风险。
+/// 适配最新版 MediaPipe GenAI API (LlmInferenceEngine)
 class LLMBrain implements BrainInterface {
-  // 离线中文知识库 (Cyberpunk Style)
-  // 通过关键词匹配，模拟 AI 识别能力
-  final Map<String, String> _knowledgeBase = {
-    '书': '检测到高密度信息载体。推测为旧时代“书籍”，蕴含着未被数字化的原始知识。建议扫描归档。',
-    '本': '检测到纸质存储介质。数据完整性良好，内容需进一步光学解析。',
-    '水': '识别为液态H2O。在荒原上属于一级生存资源。辐射指数：低（可饮用）。',
-    '瓶': '识别为液态存储容器。工业级封装，密封性良好。',
-    '杯': '识别为民用级饮水器具。表面检测到微量生物残留。',
-    '键盘': '发现旧式输入设备。机械结构完整，可能是黑客遗留的物理接口。',
-    '鼠标': '发现光电定位设备。连接协议：未知。',
-    '电脑': '检测到高算力计算节点。尝试接入... 防火墙等级：高。',
-    '屏幕': '识别为光电显示终端。像素点排列规则，属于标准的视觉输出接口。',
-    '显示器': '识别为视觉输出矩阵。分辨率解析中...',
-    '手机': '检测到便携式通信终端。信号加密等级：军用级。',
-    '药': '扫描到化学合成物。医疗用途。建议收容以备不时之需。',
-    '卡': '检测到身份/凭证磁卡。磁条信息已读取，正在暴力破解权限...',
-    '笔': '识别为物理书写工具。墨水残留量：45%。',
-    '眼镜': '发现视觉辅助设备。镜片折射率正常。',
-    '耳机': '识别为音频接收装置。降噪模块在线。',
-    '鞋': '识别为单兵行军装备。磨损度：15%。',
-    '包': '检测到战术收纳单元。内部可能有未识别的物资。',
-    '猫': '警报：检测到碳基生物（Felis catus）。威胁等级：极高（精神控制风险）。',
-    '狗': '检测到碳基生物（Canis lupus）。忠诚度判定中...',
-  };
+  bool _isInitialized = false;
 
-  // 通用备用模板 (随机调用)
-  final List<String> _fallbackTemplates = [
-    "解析完毕。目标物质结构稳定，检测到微量旧时代辐射残留。推测为大崩坏前的工业制品。",
-    "警告：扫描到未知的数据签名。该物体表面附着着微弱的模因污染，建议谨慎接入。",
-    "数据库匹配成功。稀有度评级：普通。但在特定维度的黑客手中，它可能成为关键触媒。",
-    "目标分析：非生物体。内部结构呈现出一种奇异的分形美感，似乎蕴含着某种未被发现的物理定律。",
-    "系统提示：该物品未在联邦数据库注册。已自动标记为“黑市物资”。",
-    "扫描完成。物品表面有磨损痕迹，推测曾在夜之城被频繁使用。",
-  ];
+  // 1. 修正：类名变更为 LlmInferenceEngine
+  LlmInferenceEngine? _engine;
+
+  // 必须与 pubspec.yaml 和 assets 实际文件名一致
+  static const String _assetModelPath =
+      'assets/models/gemma-2b-it-gpu-int4.bin';
+  static const String _targetFileName = 'gemma-2b.bin';
 
   @override
   Future<void> init() async {
-    print("🧠 Offline Neural Engine (CN): ONLINE.");
-  }
+    if (_isInitialized) return;
+    print("🧠 Neural Engine: Initializing Kernel...");
 
-  @override
-  Map<String, double> analyzeStats(String text) {
-    // 确定性随机：同一个物体每次扫出来的属性都一样
-    int seed = text.hashCode;
-    Random rng = Random(seed);
-    double complexity = (text.length / 50).clamp(0.2, 0.9);
+    try {
+      // 1. 拷贝模型到本地
+      final newPath = await _copyModelToLocal();
 
-    return {
-      "ATK": (rng.nextDouble() * 0.8 + 0.1),
-      "DEF": (rng.nextDouble() * 0.8 + 0.1),
-      "SPD": (rng.nextDouble() * 0.8 + 0.1),
-      "MAG": (rng.nextDouble() * 0.6 + complexity * 0.4).clamp(0.0, 1.0),
-      "LUCK": rng.nextDouble(),
-    };
-  }
+      // 2. 修正：使用 .gpu 命名构造函数
+      // 注意：sequenceBatchSize 是新必填项，通常设为 1 (单次对话)
+      final options = LlmInferenceOptions.gpu(
+        modelPath: newPath,
+        maxTokens: 512,
+        temperature: 0.7,
+        topK: 40,
+        randomSeed: 1024,
+        sequenceBatchSize: 1, // 新增必填参数
+      );
 
-  @override
-  Stream<String> generateLore(String text, String translatedText) async* {
-    // 1. 模拟“思考”延迟 (打字机效果)
-    String loading =
-        "正在检索本地数据库... [HASH_${text.hashCode.toRadixString(16).toUpperCase()}]\n";
-    for (var char in loading.split('')) {
-      await Future.delayed(const Duration(milliseconds: 20));
-      yield char;
-    }
-    await Future.delayed(const Duration(milliseconds: 300));
+      // 3. 修正：直接同步构造，不需要 await createFromOptions
+      _engine = LlmInferenceEngine(options);
 
-    // 2. 核心逻辑：关键词匹配
-    String result = "";
-    bool foundKeyword = false;
-
-    // 优先匹配翻译后的中文文本
-    for (var key in _knowledgeBase.keys) {
-      if (translatedText.contains(key) || text.contains(key)) {
-        result = _knowledgeBase[key]!;
-        foundKeyword = true;
-        break;
-      }
-    }
-
-    // 3. 没匹配到，使用通用赛博风模板
-    if (!foundKeyword) {
-      int seed = text.hashCode;
-      result = _fallbackTemplates[seed % _fallbackTemplates.length];
-    }
-
-    // 4. 组装最终文案
-    String finalOutput = "\n>> 目标识别：$translatedText\n>> 分析报告：$result";
-
-    // 5. 输出流
-    for (var char in finalOutput.split('')) {
-      await Future.delayed(const Duration(milliseconds: 30));
-      yield char;
+      _isInitialized = true;
+      print("🧠 Neural Engine: ONLINE (Gemma GPU Active).");
+    } catch (e) {
+      print("❌ Neural Engine Critical Failure: $e");
+      rethrow;
     }
   }
 
   @override
-  void dispose() {}
+  Future<Map<String, dynamic>> analyzeTarget(String inputTags) async {
+    _checkStatus();
+    print("🧠 Thinking (Reasoning): Analyzing '$inputTags'...");
+
+    final prompt =
+        '''
+<start_of_turn>user
+Role: Game Engine System.
+Task: Analyze the input tags and generate RPG stats (0.0 to 1.0).
+Input Tags: "$inputTags"
+Rules:
+1. If tags imply danger (weapon, fire), high ATK.
+2. If tags imply tech (screen, wire), high MAG & DEF.
+3. Output strictly valid JSON only. No markdown, no explanations.
+Format: {"ATK": float, "DEF": float, "SPD": float, "MAG": float, "LUCK": float}
+<end_of_turn>
+<start_of_turn>model
+''';
+
+    try {
+      // 4. 修正：API 只有 Stream 返回。我们需要把流聚合成一个完整的字符串。
+      final stream = _engine!.generateResponse(prompt);
+
+      // 将流中的所有片段拼接起来
+      final fullResponse = await stream.join();
+
+      // 清洗并解析 JSON
+      final jsonString = _extractJson(fullResponse);
+      return json.decode(jsonString);
+    } catch (e) {
+      print("⚠️ Reasoning Error: $e");
+      // Fallback
+      return {"ATK": 0.5, "DEF": 0.5, "SPD": 0.5, "MAG": 0.5, "LUCK": 0.5};
+    }
+  }
+
+  @override
+  Stream<String> generateLoreStream(String inputTags) {
+    _checkStatus();
+    print("🧠 Thinking (Generation): Drafting lore for '$inputTags'...");
+
+    final prompt =
+        '''
+<start_of_turn>user
+Task: Write a short, cryptic cyberpunk item description for an object identified as: "$inputTags".
+Style: Gibson-esque, high-tech low-life, noir.
+Limit: 2 sentences max.
+Output: Just the description text.
+<end_of_turn>
+<start_of_turn>model
+''';
+
+    // 5. 修正：直接返回 Stream 即可，无需改动
+    return _engine!.generateResponse(prompt);
+  }
+
+  void _checkStatus() {
+    if (!_isInitialized || _engine == null) {
+      throw Exception("Neural Engine not initialized! Call init() first.");
+    }
+  }
+
+  Future<String> _copyModelToLocal() async {
+    final directory = await getApplicationDocumentsDirectory();
+    final filePath = '${directory.path}/$_targetFileName';
+    final file = File(filePath);
+
+    if (await file.exists()) {
+      print("📂 Model found locally: $filePath");
+      return filePath;
+    }
+
+    print("📂 Copying model from assets... (This may take 10-20s)");
+    final byteData = await rootBundle.load(_assetModelPath);
+    await file.writeAsBytes(
+      byteData.buffer.asUint8List(
+        byteData.offsetInBytes,
+        byteData.lengthInBytes,
+      ),
+    );
+    print("📂 Model copy complete.");
+    return filePath;
+  }
+
+  String _extractJson(String raw) {
+    final start = raw.indexOf('{');
+    final end = raw.lastIndexOf('}');
+    if (start != -1 && end != -1) {
+      return raw.substring(start, end + 1);
+    }
+    return raw;
+  }
+
+  @override
+  void dispose() {
+    // 6. 修正：安全关闭
+    try {
+      _engine?.dispose();
+    } catch (e) {
+      print("Dispose error: $e");
+    }
+    _engine = null;
+    _isInitialized = false;
+  }
 }

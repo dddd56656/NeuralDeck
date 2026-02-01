@@ -1,5 +1,3 @@
-// 文件: lib/main.dart
-
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'core/services/local_db.dart';
@@ -8,21 +6,17 @@ import 'core/theme/cyberpunk_theme.dart';
 import 'modules/deck/screens/scanner_screen.dart';
 import 'modules/deck/screens/card_detail_screen.dart';
 
-void main() async {
+void main() {
+  // 1. 移除 async，移除这里的 await 初始化
   WidgetsFlutterBinding.ensureInitialized();
 
-  try {
-    await LocalDB.instance.database;
-    await BrainService().init();
-  } catch (e) {
-    print("CRITICAL: Services failed to start: $e");
-  }
-
+  // 锁定竖屏
   SystemChrome.setPreferredOrientations([
     DeviceOrientation.portraitUp,
     DeviceOrientation.portraitDown,
   ]);
 
+  // 2. 立即启动 UI，不等待
   runApp(const NeuralDeckApp());
 }
 
@@ -35,10 +29,108 @@ class NeuralDeckApp extends StatelessWidget {
       title: 'NeuralDeck',
       debugShowCheckedModeBanner: false,
       theme: CyberpunkTheme.themeData,
-      home: const MobileTerminalScreen(),
+      // 3. 将首页指向新的 SplashScreen
+      home: const SplashScreen(),
     );
   }
 }
+
+/// [新增] 启动页
+/// 负责在后台执行耗时的初始化任务，同时在前台显示 Loading 动画
+class SplashScreen extends StatefulWidget {
+  const SplashScreen({super.key});
+
+  @override
+  State<SplashScreen> createState() => _SplashScreenState();
+}
+
+class _SplashScreenState extends State<SplashScreen> {
+  String _statusText = "INITIALIZING SYSTEM...";
+  double? _progressValue; // null 表示不确定进度的动画
+
+  @override
+  void initState() {
+    super.initState();
+    // 页面渲染完成后，立即执行初始化
+    WidgetsBinding.instance.addPostFrameCallback((_) => _bootstrap());
+  }
+
+  Future<void> _bootstrap() async {
+    try {
+      // 阶段 1: 数据库
+      setState(() => _statusText = "MOUNTING MEMORY (SQLITE)...");
+      await LocalDB.instance.database;
+
+      // 阶段 2: 神经网络 (最耗时)
+      setState(() {
+        _statusText = "INSTALLING NEURAL CORE...\n(FIRST RUN MAY TAKE 20s)";
+      });
+
+      // 让 UI 呼吸一下，避免渲染锁死
+      await Future.delayed(const Duration(milliseconds: 100));
+
+      await BrainService().init();
+
+      // 阶段 3: 完成
+      setState(() => _statusText = "SYSTEM ONLINE.");
+      await Future.delayed(const Duration(milliseconds: 500));
+
+      if (!mounted) return;
+
+      // 跳转到主界面 (使用 pushReplacement 销毁启动页)
+      Navigator.of(context).pushReplacement(
+        MaterialPageRoute(builder: (_) => const MobileTerminalScreen()),
+      );
+    } catch (e) {
+      setState(() {
+        _statusText = "BOOT FAILURE: $e\nPLEASE RESTART.";
+      });
+      print("CRITICAL: Services failed to start: $e");
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: Colors.black, // 确保背景是黑的
+      body: Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            // 赛博风格的 Logo 或图标
+            const Icon(Icons.hub, size: 80, color: Color(0xFF00F0FF)),
+            const SizedBox(height: 30),
+
+            // 进度条
+            SizedBox(
+              width: 200,
+              child: LinearProgressIndicator(
+                value: _progressValue,
+                backgroundColor: const Color(0xFF121212),
+                color: const Color(0xFFFF003C),
+              ),
+            ),
+            const SizedBox(height: 20),
+
+            // 状态文字
+            Text(
+              _statusText,
+              textAlign: TextAlign.center,
+              style: const TextStyle(
+                fontFamily: 'Courier',
+                color: Color(0xFF00F0FF),
+                fontSize: 12,
+                letterSpacing: 1.5,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// --- 以下保持原来的 MobileTerminalScreen 逻辑不变 ---
 
 class MobileTerminalScreen extends StatefulWidget {
   const MobileTerminalScreen({super.key});
@@ -61,7 +153,7 @@ class _MobileTerminalScreenState extends State<MobileTerminalScreen> {
     return Scaffold(
       appBar: AppBar(
         title: const Text(
-          "神经终端 v1.0", // [汉化]
+          "神经终端 v1.0",
           style: TextStyle(letterSpacing: 2, fontSize: 18),
         ),
         centerTitle: true,
@@ -88,18 +180,12 @@ class _MobileTerminalScreenState extends State<MobileTerminalScreen> {
           unselectedItemColor: Colors.grey,
           type: BottomNavigationBarType.fixed,
           items: const [
-            BottomNavigationBarItem(
-              icon: Icon(Icons.history),
-              label: '历史记录',
-            ), // [汉化]
+            BottomNavigationBarItem(icon: Icon(Icons.history), label: '历史记录'),
             BottomNavigationBarItem(
               icon: Icon(Icons.qr_code_scanner, size: 32),
               label: '扫描',
-            ), // [汉化]
-            BottomNavigationBarItem(
-              icon: Icon(Icons.analytics),
-              label: '系统诊断',
-            ), // [汉化]
+            ),
+            BottomNavigationBarItem(icon: Icon(Icons.analytics), label: '系统诊断'),
           ],
         ),
       ),
@@ -144,7 +230,7 @@ class _LogsPageState extends State<_LogsPage> {
             child: Text(
               "暂无数据记录",
               style: TextStyle(color: Colors.grey, letterSpacing: 2),
-            ), // [汉化]
+            ),
           );
         }
 
@@ -219,13 +305,10 @@ class _DiagnosticsPage extends StatelessWidget {
         children: [
           Icon(Icons.analytics_outlined, size: 64, color: Color(0xFFFF003C)),
           SizedBox(height: 16),
-          Text(
-            "系统状态监控",
-            style: TextStyle(letterSpacing: 2, fontSize: 16),
-          ), // [汉化]
+          Text("系统状态监控", style: TextStyle(letterSpacing: 2, fontSize: 16)),
           SizedBox(height: 8),
           Text(
-            "CPU核心: 正常运转\n神经内存: 状态极佳\n网络连接: 已断开 (离线模式)", // [汉化] 强调离线
+            "CPU核心: 正常运转\n神经内存: 状态极佳\n网络连接: 已断开 (离线模式)",
             textAlign: TextAlign.center,
             style: TextStyle(color: Colors.grey, height: 1.5),
           ),

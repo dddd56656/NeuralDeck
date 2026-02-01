@@ -37,6 +37,13 @@ android {
             signingConfig = signingConfigs.getByName("debug")
         }
     }
+    // 🔥🔥🔥 [Google CTO 关键修改] 🔥🔥🔥
+    // 禁止压缩 .bin 模型文件。
+    // 这行代码是解决 1.5GB 模型加载卡死/OOM 问题的唯一钥匙。
+    // 在 Kotlin DSL 中，必须使用 "+=" 来追加扩展名。
+    aaptOptions {
+        noCompress += "bin"
+    }
 }
 
 flutter {

@@ -52,6 +52,9 @@ dependencies:
   llama_cpp_dart: ^0.2.2
   permission_handler: ^12.0.1
   flutter_gemma: ^0.12.2
+  mediapipe_genai: ^0.0.1
+  path_provider: ^2.1.5
+  google_mlkit_image_labeling: ^0.14.1
 
 dev_dependencies:
   flutter_test:
@@ -63,6 +66,7 @@ dev_dependencies:
   # package. See that file for information about deactivating specific lint
   # rules and activating additional ones.
   flutter_lints: ^6.0.0
+  flutter_launcher_icons: ^0.14.4
 
 # For information on the generic Dart part of this file, see the
 # following page: https://dart.dev/tools/pub/pubspec
@@ -75,6 +79,8 @@ flutter:
   # the material Icons class.
   uses-material-design: true
   assets:
+    # 注册模型路径，否则 rootBundle 找不到它
+    - assets/models/gemma-2b-it-gpu-int4.bin
     # - assets/models/qwen.gguf
   # 👈 这行必须手动确认有
   # To add assets to your application, add an assets section, like this:
@@ -107,3 +113,9 @@ flutter:
   #
   # For details regarding fonts from package dependencies,
   # see https://flutter.dev/to/font-from-package
+# 2. 这里添加配置块 (建议放在文件最底部，顶格写，不要有缩进)
+flutter_launcher_icons:
+  android: "launcher_icon"
+  ios: true
+  image_path: "assets/icon/app_icon.png" # 确保你的图片确实在这个路径
+  min_sdk_android: 21
