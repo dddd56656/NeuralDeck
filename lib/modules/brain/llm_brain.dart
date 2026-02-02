@@ -102,17 +102,9 @@ class LLMBrain implements BrainInterface {
 
     // 1. 构造 Prompt
     final prompt =
-        '''<|im_start|>system
-Cyberpunk item analyzer. Brief.
-<|im_end|>
-<|im_start|>user
-Analyze "$inputTags". Max 20 words.
-<|im_end|>
-<|im_start|>assistant
-''';
+        'Item: $inputTags\nDescription (Cyberpunk style): The $inputTags is a high-tech artifact that';
 
-    print("📝 发送 Prompt 到 Context $_contextId...");
-
+    print("📝 发送简单 Prompt 到 Context $_contextId...");
     // 2. 创建 StreamController 来转发数据
     final controller = StreamController<String>();
 
@@ -145,18 +137,15 @@ Analyze "$inputTags". Max 20 words.
         );
 
     // 4. 触发生成 (Fire and Forget)
-    // 注意：completion 是 Future，但我们会通过上面的 subscription 收到结果
     Fllama.instance()!
         .completion(
           _contextId!,
           prompt: prompt,
-          nPredict: 64, // 限制长度
-          emitRealtimeCompletion: true, // ✅ 关键：必须开启实时流
+          nPredict: 32, // 限制输出长度
+          emitRealtimeCompletion: true,
+          // ⚠️ 尝试调高温度，防止它死板地输出空
+          temperature: 0.8,
         )
-        .then((_) {
-          // completion Future 完成表示请求发送完毕，但流可能还在继续
-          // 通常不需要在这里做太多操作
-        })
         .catchError((e) {
           controller.addError(e);
           controller.close();
