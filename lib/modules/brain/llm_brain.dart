@@ -3,168 +3,128 @@ import 'dart:io';
 import 'dart:math';
 import 'package:flutter/services.dart';
 import 'package:path_provider/path_provider.dart';
-// ⚠️ 确保引用路径正确，指向你存放 Fllama 类的位置
 import 'package:fllama/fllama.dart';
 import 'brain_interface.dart';
 
 class LLMBrain implements BrainInterface {
   bool _isInitialized = false;
-
-  // 保存由 Fllama 返回的上下文 ID
   double? _contextId;
 
-  // 模型文件名
-  static const String _modelFileName = 'qwen.gguf';
+  // ✅ 1. 确保文件名一致
+  static const String _modelFileName = 'tinyllama.gguf';
 
   @override
   Future<void> init() async {
     if (_isInitialized && _contextId != null) return;
-    print("🧠 (Qwen): Initializing Engine via Fllama...");
+    print("🧠 (TinyLlama): Init...");
 
     try {
       final directory = await getApplicationDocumentsDirectory();
       final modelPath = '${directory.path}/$_modelFileName';
       final file = File(modelPath);
 
-      // 1. 搬运模型 (Assets -> Local Storage)
-      if (!file.existsSync() || file.lengthSync() < 100 * 1024 * 1024) {
-        print("📦 正在释放 Qwen 模型...");
+      // 搬运模型 (Assets -> App Doc Dir)
+      if (!file.existsSync()) {
+        print("📦 正在释放 TinyLlama 模型 (600MB+)...");
         try {
           final ByteData data = await rootBundle.load(
             'assets/models/$_modelFileName',
           );
           final List<int> bytes = data.buffer.asUint8List();
           await file.writeAsBytes(bytes, flush: true);
-          print("✅ 模型释放完成: $modelPath");
+          print("✅ 模型释放完成");
         } catch (e) {
-          throw Exception("❌ 模型释放失败，请检查 pubspec.yaml: $e");
+          throw Exception(
+            "❌ 找不到 assets/models/tinyllama.gguf，请检查 pubspec.yaml: $e",
+          );
         }
       }
 
-      // 2. 初始化 Context
-      // 根据你的 Fllama 源码，我们需要调用 initContext
-      print("🚀 正在加载模型到内存...");
+      // 初始化引擎
+      print("🚀 Loading Engine...");
       final result = await Fllama.instance()!.initContext(
         modelPath,
-        nCtx: 512, // 上下文长度，设小点省内存
-        nThreads: 4, // 4线程适合大部分手机
-        nGpuLayers: 0, // 强制 CPU 模式，最稳定
-        emitLoadProgress: true, // 允许监听加载进度
+        nCtx: 2048, // TinyLlama 支持 2048
+        nThreads: 4, // 4线程
+        nGpuLayers: 0, // 强制 CPU
+        emitLoadProgress: true,
       );
 
-      print("🤖 Init Result: $result");
-
-      // 3. 提取 Context ID
-      // Fllama 通常会在返回的 Map 中包含 'contextId' 或类似字段
-      // 如果 result 为空或者解析失败，说明初始化挂了
       if (result != null && result.containsKey('contextId')) {
         _contextId = (result['contextId'] as num).toDouble();
-        print("✅ Qwen 引擎就绪, Context ID: $_contextId");
+        print("✅ Engine Ready! ID: $_contextId");
         _isInitialized = true;
       } else {
-        // 尝试从 keys 猜测，如果 map 只有一个 entry 且是 double
-        throw Exception("Fllama 初始化返回了无法识别的数据: $result");
+        throw Exception("Init failed: $result");
       }
     } catch (e) {
-      print("❌ 初始化失败: $e");
+      print("❌ Init Error: $e");
       rethrow;
     }
   }
 
-  // ------------------------------------------------------
-  // ⚡ 哈希属性 (保持 0 延迟秒开)
-  // ------------------------------------------------------
+  // 这里的 analyzeTarget 保持不变...
   @override
   Future<Map<String, dynamic>> analyzeTarget(String inputTags) async {
-    // 确保已初始化
     if (!_isInitialized) await init();
-
-    print("⚡ Fast Stats: $inputTags");
     final seed = inputTags.codeUnits.fold(0, (p, c) => p + c);
-    final random = Random(seed);
-    double r() => (random.nextInt(90) + 10) / 100.0;
-
-    // 模拟一点点计算感
+    final rnd = Random(seed);
+    double r() => (rnd.nextInt(90) + 10) / 100.0;
     await Future.delayed(const Duration(milliseconds: 100));
-
     return {"ATK": r(), "DEF": r(), "SPD": r(), "MAG": r(), "LUCK": r()};
   }
 
-  // ------------------------------------------------------
-  // 📜 传说生成 (适配 Fllama Stream)
-  // ------------------------------------------------------
   @override
   Stream<String> generateLoreStream(String inputTags) {
-    if (!_isInitialized || _contextId == null) {
-      // 如果没初始化，返回错误流
+    if (!_isInitialized || _contextId == null)
       return Stream.error("Brain not initialized");
-    }
 
-    // 1. 构造 Prompt
+    // ✅ 2. TinyLlama 专用 Prompt 格式 (非常重要！)
+    // 必须严格遵守 <|system|> ... </s> 这种格式
     final prompt =
-        'Item: $inputTags\nDescription (Cyberpunk style): The $inputTags is a high-tech artifact that';
+        '''<|system|>
+You are a Cyberpunk item analyzer. Describe the item in 1 sentence.</s>
+<|user|>
+Item: "$inputTags"</s>
+<|assistant|>''';
 
-    print("📝 发送简单 Prompt 到 Context $_contextId...");
-    // 2. 创建 StreamController 来转发数据
+    print("📝 Sending Prompt...");
     final controller = StreamController<String>();
 
-    // 3. 订阅全局 Token 流
-    // Fllama 的 onTokenStream 是一个全局广播流
-    final StreamSubscription subscription = Fllama.instance()!.onTokenStream!
-        .listen(
-          (Map<Object?, dynamic> event) {
-            // event 结构通常是: {'contextId': 1.0, 'token': 'xxx', ...}
+    final sub = Fllama.instance()!.onTokenStream!.listen((event) {
+      if (event['contextId'] == _contextId) {
+        final token = event['token'] as String?;
+        if (token != null) {
+          // 打印到控制台看看有没有反应
+          stdout.write(token);
+          controller.add(token);
+        }
+        if (event['is_end'] == true || event['done'] == true) {
+          print("\n✅ Done");
+          controller.close();
+        }
+      }
+    }, onError: controller.addError);
 
-            // 过滤：只处理当前 Context 的消息
-            if (event['contextId'] == _contextId) {
-              // 提取 token 文本
-              final token = event['token'] as String?;
-              if (token != null) {
-                controller.add(token);
-              }
-
-              // 检查是否结束 (部分库会发 isEnd 或类似标志，或者 token 为空)
-              // 这里我们简单处理：如果不报错就一直流，直到 UI 层通过 dispose 关掉它
-              if (event['is_end'] == true || event['done'] == true) {
-                controller.close();
-              }
-            }
-          },
-          onError: (e) {
-            print("❌ Stream Error: $e");
-            controller.addError(e);
-          },
-        );
-
-    // 4. 触发生成 (Fire and Forget)
     Fllama.instance()!
         .completion(
           _contextId!,
           prompt: prompt,
-          nPredict: 32, // 限制输出长度
+          nPredict: 50,
           emitRealtimeCompletion: true,
-          // ⚠️ 尝试调高温度，防止它死板地输出空
-          temperature: 0.8,
         )
         .catchError((e) {
           controller.addError(e);
           controller.close();
         });
 
-    // 5. 当外部取消订阅时，清理资源
-    controller.onCancel = () {
-      subscription.cancel();
-      // 可选：调用 stopCompletion
-      // Fllama.instance()!.stopCompletion(contextId: _contextId!);
-    };
-
+    controller.onCancel = () => sub.cancel();
     return controller.stream;
   }
 
   @override
   Future<void> dispose() async {
     if (_contextId != null) {
-      print("🛑 释放 Context $_contextId");
       await Fllama.instance()!.releaseContext(_contextId!);
       _contextId = null;
     }
