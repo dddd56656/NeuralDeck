@@ -81,7 +81,7 @@ flutter:
   uses-material-design: true
   assets:
     # - assets/models/qwen.gguf     <-- 删掉旧的
-    - assets/models/tinyllama.gguf  <-- 确保是这个
+    - assets/models/tinyllama.gguf 
     # - assets/models/qwen.gguf
   # 👈 这行必须手动确认有
   # To add assets to your application, add an assets section, like this:

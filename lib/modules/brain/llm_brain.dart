@@ -76,49 +76,79 @@ class LLMBrain implements BrainInterface {
 
   @override
   Stream<String> generateLoreStream(String inputTags) {
-    if (!_isInitialized || _contextId == null)
+    // 1. 基础检查
+    if (!_isInitialized || _contextId == null) {
+      print("❌ 大脑未初始化，尝试重新初始化...");
+      // 可以在这里尝试重新 init()，或者直接报错
       return Stream.error("Brain not initialized");
+    }
 
-    // ✅ 2. TinyLlama 专用 Prompt 格式 (非常重要！)
-    // 必须严格遵守 <|system|> ... </s> 这种格式
+    // 🔴 [重点修改] 抛弃所有复杂的 <|system|> 标签
+    // 改用“强制续写”模式。
+    // 比如：Input="刀", Prompt="这是一把赛博朋克风格的刀，它的特点是"
+    // 模型看到这个结尾，不得不把后面的话补全。
     final prompt =
-        '''<|system|>
-You are a Cyberpunk item analyzer. Describe the item in 1 sentence.</s>
-<|user|>
-Item: "$inputTags"</s>
-<|assistant|>''';
+        'Describe $inputTags in a Cyberpunk style. The $inputTags is';
 
-    print("📝 Sending Prompt...");
+    print("📝 发送强制续写 Prompt: [$prompt] (Context ID: $_contextId)");
+
     final controller = StreamController<String>();
 
-    final sub = Fllama.instance()!.onTokenStream!.listen((event) {
-      if (event['contextId'] == _contextId) {
-        final token = event['token'] as String?;
-        if (token != null) {
-          // 打印到控制台看看有没有反应
-          stdout.write(token);
-          controller.add(token);
-        }
-        if (event['is_end'] == true || event['done'] == true) {
-          print("\n✅ Done");
-          controller.close();
-        }
-      }
-    }, onError: controller.addError);
+    // 2. 监听流 (保持不变，加了点日志)
+    final sub = Fllama.instance()!.onTokenStream!.listen(
+      (event) {
+        // 只处理当前 Context 的消息
+        if (event['contextId'] == _contextId) {
+          final token = event['token'] as String?;
 
+          // 🔍 调试日志：看看到底有没有字
+          if (token != null && token.isNotEmpty) {
+            print("🔤 AI吐字: [$token]");
+            controller.add(token);
+          } else {
+            // 有时候空包也是正常的，忽略即可
+          }
+
+          // 结束判断
+          if (event['is_end'] == true || event['done'] == true) {
+            print("✅ 生成结束 (Done Signal)");
+            controller.close();
+          }
+        }
+      },
+      onError: (e) {
+        print("❌ 流监听报错: $e");
+        controller.addError(e);
+      },
+    );
+
+    // 3. 发送请求 (参数微调)
     Fllama.instance()!
         .completion(
           _contextId!,
           prompt: prompt,
-          nPredict: 50,
-          emitRealtimeCompletion: true,
+          nPredict: 50, // 强制定长 50 个 token
+          temperature: 0.8, // 温度稍微高点，让它活跃点
+          topK: 40, // 标准采样参数
+          topP: 0.9, // 标准采样参数
+          emitRealtimeCompletion: true, // 必须开启实时流
         )
+        .then((_) {
+          print("📡 请求已发送给底层引擎");
+        })
         .catchError((e) {
+          print("❌ 请求发送失败: $e");
           controller.addError(e);
           controller.close();
         });
 
-    controller.onCancel = () => sub.cancel();
+    // 4. 清理逻辑
+    controller.onCancel = () {
+      print("🛑 用户取消了生成");
+      sub.cancel();
+      // 可选：Fllama.instance()!.stopCompletion(contextId: _contextId!);
+    };
+
     return controller.stream;
   }
 
