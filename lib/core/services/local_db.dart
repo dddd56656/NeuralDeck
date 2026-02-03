@@ -1,31 +1,20 @@
-// 在文件头部引入 async
 import 'dart:async';
 import 'package:sqflite/sqflite.dart';
 import 'package:path/path.dart';
 
-/// [LocalDB] 负责本地 SQLite 数据的持久化。
-/// 采用单例模式，确保全局只有一个数据库连接。
+/// [LocalDB] 负责本地数据持久化，新增了 lore_cache 表。
 class LocalDB {
-  // 1. 私有构造函数与单例实现
   LocalDB._internal();
   static final LocalDB instance = LocalDB._internal();
 
-  // 2. 数据库实例，使用 getter 确保安全访问
   Database? _database;
-
-  // ✅ 替换原来的 bool _isInitializing
   Completer<Database>? _dbCompleter;
 
-  // ✅ 替换原来的 database getter
   Future<Database> get database async {
     if (_database != null) return _database!;
-
-    if (_dbCompleter != null) {
-      return _dbCompleter!.future;
-    }
+    if (_dbCompleter != null) return _dbCompleter!.future;
 
     _dbCompleter = Completer<Database>();
-
     try {
       _database = await _initDatabase();
       _dbCompleter!.complete(_database);
@@ -37,20 +26,36 @@ class LocalDB {
     return _database!;
   }
 
-  /// 私有初始化逻辑
   Future<Database> _initDatabase() async {
     final dbPath = await getDatabasesPath();
     final path = join(dbPath, 'neural_deck.db');
 
-    return await openDatabase(path, version: 1, onCreate: _onCreate);
+    // 注意：如果增加了新表，建议增加 version 版本号
+    return await openDatabase(
+      path,
+      version: 2,
+      onCreate: _onCreate,
+      onUpgrade: _onUpgrade,
+    );
   }
 
-  /// 数据库表创建逻辑 (独立提取，提高可读性)
+  /// 升级数据库以添加 lore_cache 表
+  Future<void> _onUpgrade(Database db, int oldVersion, int newVersion) async {
+    if (oldVersion < 2) {
+      await db.execute('''
+        CREATE TABLE lore_cache (
+          tags TEXT PRIMARY KEY,
+          content TEXT NOT NULL,
+          updated_at INTEGER NOT NULL
+        )
+      ''');
+    }
+  }
+
   Future<void> _onCreate(Database db, int version) async {
-    // 使用 Batch 操作提升多表创建性能
     final batch = db.batch();
 
-    // 卡片表：存储 AI 学习数据
+    // 核心卡片表
     batch.execute('''
       CREATE TABLE cards (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -61,7 +66,16 @@ class LocalDB {
       )
     ''');
 
-    // 日志表：系统行为审计
+    // 赛博背景描述缓存表
+    batch.execute('''
+      CREATE TABLE lore_cache (
+        tags TEXT PRIMARY KEY,
+        content TEXT NOT NULL,
+        updated_at INTEGER NOT NULL
+      )
+    ''');
+
+    // 日志审计表
     batch.execute('''
       CREATE TABLE logs (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -73,19 +87,43 @@ class LocalDB {
     await batch.commit();
   }
 
-  // --- 数据操作 API ---
+  // --- 缓存操作 API ---
 
-  /// 插入数据
+  /// 获取缓存的赛博描述
+  Future<String?> getCachedLore(String tags) async {
+    final db = await database;
+    final List<Map<String, dynamic>> maps = await db.query(
+      'lore_cache',
+      where: 'tags = ?',
+      whereArgs: [tags],
+    );
+    if (maps.isNotEmpty) {
+      return maps.first['content'] as String;
+    }
+    return null;
+  }
+
+  /// 将生成的描述存入缓存，修复报错：'saveLoreToCache' isn't defined
+  Future<void> saveLoreToCache(String tags, String content) async {
+    final db = await database;
+    await db.insert('lore_cache', {
+      'tags': tags,
+      'content': content,
+      'updated_at': DateTime.now().millisecondsSinceEpoch,
+    }, conflictAlgorithm: ConflictAlgorithm.replace);
+  }
+
+  // --- 基础数据操作 ---
+
   Future<int> insertData(String table, Map<String, dynamic> data) async {
     final db = await database;
     return await db.insert(
       table,
       data,
-      conflictAlgorithm: ConflictAlgorithm.replace, // 冲突处理策略
+      conflictAlgorithm: ConflictAlgorithm.replace,
     );
   }
 
-  /// 查询所有数据
   Future<List<Map<String, dynamic>>> queryAll(String table) async {
     final db = await database;
     return await db.query(table, orderBy: "id DESC");
